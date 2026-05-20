@@ -69,5 +69,36 @@ jobs:
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && sudo systemctl restart nginx
 
-         
-
+      - name: Deploy Application
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST_BACKEND }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            sudo apt update && sudo apt upgrade -y
+            sudo apt install -y git curl wget unzip build-essential
+            git clone https://github.com/agkanon/3tier-webapp-github-actions.git
+            cd 3tier-webapp-github-actions/backend
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+            sudo apt install -y nodejs
+            sudo npm install -g pm2
+            node -v && npm -v && pm2 -v
+            sudo mkdir -p /opt/bmi-app/backend
+            sudo chown -R $USER:$USER /opt/bmi-app
+            cat > /opt/bmi-app/backend/.env << EOF
+            DATABASE_URL=postgresql://bmi_user:bmi_user@localhost:5432/bmidb
+            DB_USER=bmi_user
+            DB_PASSWORD=bmi_user
+            DB_NAME=bmidb
+            DB_HOST=localhost
+            DB_PORT=5432
+            PORT=3000
+            NODE_ENV=production
+            CORS_ORIGIN=*
+            EOF
+            chmod 600 /opt/bmi-app/backend/.env
+            pm2 start src/server.js --name bmi-backend --env production
+            pm2 save
+            sudo env PATH=$PATH:$(which node) $(which pm2) startup systemd -u $USER --hp $HOME
+            pm2 save
