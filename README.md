@@ -562,10 +562,6 @@ Daily Calories = BMR × Activity Multiplier
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
-
-This project is part of the OSTAD M6 curriculum. Check with your instructor for licensing details.
-
 ## 📧 Support
 
 For issues, questions, or feature requests, please open an issue in the repository or contact the development team.
