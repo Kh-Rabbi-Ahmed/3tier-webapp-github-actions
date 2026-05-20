@@ -23,6 +23,8 @@ jobs:
         working-directory: ./frontend
         run: |
           sudo apt update
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
           sudo apt install -y nginx
           sudo systemctl start nginx
           sudo systemctl enable nginx  
@@ -69,10 +71,6 @@ jobs:
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && sudo systemctl restart nginx
       
-      - name: Install Docker
-        run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
       
       - name: Deploy Application
         uses: appleboy/ssh-action@v1.0.3
