@@ -22,6 +22,7 @@ jobs:
       - name: Install UI dependencies
         working-directory: ./frontend
         run: |
+          sudo apt update
           sudo apt install -y nginx
           sudo systemctl start nginx
           sudo systemctl enable nginx  
