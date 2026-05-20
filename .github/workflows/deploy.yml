@@ -87,20 +87,72 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            sudo apt update && sudo apt upgrade -y
-            sudo apt install -y postgresql postgresql-contrib
-            sudo systemctl start postgresql
-            sudo systemctl enable postgresql
-            sudo -u postgres psql -c "CREATE USER bmi_user WITH PASSWORD 'bmi_user';"  
-            sudo -u postgres psql -c "CREATE DATABASE bmidb;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bmidb TO bmi_user;"  
-            sudo -u postgres psql -d bmidb -c "GRANT ALL ON SCHEMA public TO bmi_user;"     
-            sudo -u postgres psql -d bmidb -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO bmi_user;"
-            git clone https://github.com/agkanon/3tier-webapp-github-actions.git
-            cd 3tier-webapp-github-actions/backend
-            PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
-            PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
+            # Install PostgreSQL only if not already installed
+            if ! command -v psql &> /dev/null; then
+              echo "PostgreSQL not found. Installing..."
+              sudo apt update && sudo apt upgrade -y
+              sudo apt install -y postgresql postgresql-contrib
+            else
+              echo "PostgreSQL already installed. Skipping installation."
+            fi
 
+            # Start and enable PostgreSQL if not already running
+            if ! sudo systemctl is-active --quiet postgresql; then
+              echo "Starting PostgreSQL..."
+              sudo systemctl start postgresql
+              sudo systemctl enable postgresql
+            else
+              echo "PostgreSQL is already running. Skipping start."
+            fi
+
+            # Create user only if it doesn't exist
+            if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='bmi_user'" | grep -q 1; then
+              echo "Creating user bmi_user..."
+              sudo -u postgres psql -c "CREATE USER bmi_user WITH PASSWORD 'bmi_user';"
+            else
+              echo "User bmi_user already exists. Skipping."
+            fi
+
+            # Create database only if it doesn't exist
+            if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='bmidb'" | grep -q 1; then
+              echo "Creating database bmidb..."
+              sudo -u postgres psql -c "CREATE DATABASE bmidb;"
+              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bmidb TO bmi_user;"
+              sudo -u postgres psql -d bmidb -c "GRANT ALL ON SCHEMA public TO bmi_user;"
+              sudo -u postgres psql -d bmidb -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO bmi_user;"
+            else
+              echo "Database bmidb already exists. Skipping creation."
+            fi
+
+            # Clone repo only if not already cloned
+            if [ ! -d "3tier-webapp-github-actions" ]; then
+              echo "Cloning repository..."
+              git clone https://github.com/agkanon/3tier-webapp-github-actions.git
+            else
+              echo "Repository already exists. Pulling latest changes..."
+              cd 3tier-webapp-github-actions && git pull && cd ..
+            fi
+
+            # Run migrations (tracked by a marker file to avoid re-running)
+            cd 3tier-webapp-github-actions/backend
+
+            if [ ! -f "/var/lib/postgresql/.migration_001_done" ]; then
+              echo "Running migration 001..."
+              PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
+              sudo touch /var/lib/postgresql/.migration_001_done
+            else
+              echo "Migration 001 already applied. Skipping."
+            fi
+
+            if [ ! -f "/var/lib/postgresql/.migration_002_done" ]; then
+              echo "Running migration 002..."
+              PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
+              sudo touch /var/lib/postgresql/.migration_002_done
+            else
+              echo "Migration 002 already applied. Skipping."
+            fi
+
+            echo "Database deployment complete."
 
 
       - name: Deploy Application
@@ -120,6 +172,8 @@ jobs:
             node -v && npm -v && pm2 -v
             sudo mkdir -p /opt/bmi-app/backend
             sudo chown -R $USER:$USER /opt/bmi-app
+            rsync -a --exclude 'node_modules' --exclude '.env' --exclude 'logs' ~/3tier-webapp-github-actions/backend/ /opt/bmi-app/backend/
+            cd /opt/bmi-app/backend
             cat > /opt/bmi-app/backend/.env << EOF
             DATABASE_URL=postgresql://bmi_user:bmi_user@${{ secrets.EC2_HOST_DATABASE }}:5432/bmidb
             DB_USER=bmi_user
@@ -132,6 +186,7 @@ jobs:
             CORS_ORIGIN=*
             EOF
             chmod 600 /opt/bmi-app/backend/.env
+            npm install --production
             pm2 start src/server.js --name bmi-backend --env production
             pm2 save
             sudo env PATH=$PATH:$(which node) $(which pm2) startup systemd -u $USER --hp $HOME
