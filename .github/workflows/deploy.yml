@@ -1,4 +1,4 @@
-name: Build, Test and success CI Pipeline
+name: Build and Deployment CICD Pipeline
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
       - main
 
 jobs:
-  build-and-test:
-    name: Build and Test 
+  Build-and-Deployment:
+    name: Build and Deployment
     runs-on: self-hosted
 
     steps:
@@ -162,19 +162,52 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            # ── System packages ──────────────────────────────────────────
             sudo apt update && sudo apt upgrade -y
             sudo apt install -y git curl wget unzip build-essential
-            git clone https://github.com/agkanon/3tier-webapp-github-actions.git
-            cd 3tier-webapp-github-actions/backend
-            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-            sudo apt install -y nodejs
-            sudo npm install -g pm2
+
+            # ── Repo: clone or pull ───────────────────────────────────────
+            if [ -d "$HOME/3tier-webapp-github-actions" ]; then
+              echo "Repo exists. Pulling latest changes..."
+              cd $HOME/3tier-webapp-github-actions
+              git pull
+            else
+              echo "Cloning repository..."
+              git clone https://github.com/agkanon/3tier-webapp-github-actions.git $HOME/3tier-webapp-github-actions
+            fi
+            cd $HOME/3tier-webapp-github-actions/backend
+
+            # ── Node.js ───────────────────────────────────────────────────
+            if ! command -v node &> /dev/null; then
+              echo "Installing Node.js..."
+              curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+              sudo apt install -y nodejs
+            else
+              echo "Node.js already installed: $(node -v)"
+            fi
+
+            # ── PM2 ───────────────────────────────────────────────────────
+            if ! command -v pm2 &> /dev/null; then
+              echo "Installing PM2..."
+              sudo npm install -g pm2
+            else
+              echo "PM2 already installed: $(pm2 -v)"
+            fi
+
             node -v && npm -v && pm2 -v
+
+            # ── App directory ─────────────────────────────────────────────
             sudo mkdir -p /opt/bmi-app/backend
             sudo chown -R $USER:$USER /opt/bmi-app
-            rsync -a --exclude 'node_modules' --exclude '.env' --exclude 'logs' ~/3tier-webapp-github-actions/backend/ /opt/bmi-app/backend/
-            cd /opt/bmi-app/backend
-            cat > /opt/bmi-app/backend/.env << EOF
+
+            # ── Sync source files ─────────────────────────────────────────
+            rsync -a --exclude 'node_modules' --exclude '.env' --exclude 'logs' \
+              $HOME/3tier-webapp-github-actions/backend/ /opt/bmi-app/backend/
+
+            # ── .env (write once, never overwrite) ───────────────────────
+            if [ ! -f /opt/bmi-app/backend/.env ]; then
+              echo "Creating .env file..."
+              cat > /opt/bmi-app/backend/.env << EOF
             DATABASE_URL=postgresql://bmi_user:bmi_user@${{ secrets.EC2_HOST_DATABASE }}:5432/bmidb
             DB_USER=bmi_user
             DB_PASSWORD=bmi_user
@@ -185,9 +218,27 @@ jobs:
             NODE_ENV=production
             CORS_ORIGIN=*
             EOF
-            chmod 600 /opt/bmi-app/backend/.env
+              chmod 600 /opt/bmi-app/backend/.env
+            else
+              echo ".env already exists. Skipping."
+            fi
+
+            # ── Dependencies ──────────────────────────────────────────────
+            cd /opt/bmi-app/backend
             npm install --production
-            pm2 start src/server.js --name bmi-backend --env production
+
+            # ── PM2 process: restart if running, else start fresh ─────────
+            if pm2 list | grep -q "bmi-backend"; then
+              echo "PM2 process exists. Restarting..."
+              pm2 restart bmi-backend
+            else
+              echo "Starting PM2 process..."
+              pm2 start src/server.js --name bmi-backend --env production
+            fi
+
+            # ── PM2 startup (idempotent) ──────────────────────────────────
             pm2 save
             sudo env PATH=$PATH:$(which node) $(which pm2) startup systemd -u $USER --hp $HOME
             pm2 save
+
+            echo "Backend deployment complete."
