@@ -24,9 +24,10 @@ jobs:
           if ! command -v docker &> /dev/null; then
             curl -fsSL https://get.docker.com -o get-docker.sh
             sudo sh get-docker.sh
-            sudo usermod -aG docker $USER
+            sudo usermod -aG docker ubuntu
             newgrp docker
           fi
+          sudo chmod 666 /var/run/docker.sock
 
       - name: Install UI dependencies
         working-directory: ./frontend
