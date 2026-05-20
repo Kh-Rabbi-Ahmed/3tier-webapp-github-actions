@@ -78,8 +78,7 @@ jobs:
           sudo ln -sf /etc/nginx/sites-available/bmi-health-tracker /etc/nginx/sites-enabled/bmi-health-tracker
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && sudo systemctl restart nginx
-      - name: Fix Docker socket permissions
-        run: sudo chmod 666 /var/run/docker.sock
+
       - name: Deploy DATABASE
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -103,8 +102,6 @@ jobs:
 
 
 
-      - name: Fix Docker socket permissions
-        run: sudo chmod 666 /var/run/docker.sock
       - name: Deploy Application
         uses: appleboy/ssh-action@v1.0.3
         with:
