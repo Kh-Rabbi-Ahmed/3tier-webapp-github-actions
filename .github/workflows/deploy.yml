@@ -28,6 +28,7 @@ jobs:
             newgrp docker
           fi
           sudo chmod 666 /var/run/docker.sock
+          sudo docker login -u agkanon -p agkanon@143
 
       - name: Install UI dependencies
         working-directory: ./frontend
