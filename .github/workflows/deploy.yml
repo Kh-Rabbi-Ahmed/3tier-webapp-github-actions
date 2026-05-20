@@ -18,10 +18,6 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '20'
-      - name: Install Docker
-        run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
 
       - name: Install UI dependencies
         working-directory: ./frontend
@@ -40,7 +36,7 @@ jobs:
           sudo tee /etc/nginx/sites-available/bmi-health-tracker > /dev/null << 'EOF'
           server {
               listen 80;
-              server_name 44.201.41.131;
+              server_name 18.207.1.32; # Replace with your server's IP or domain
 
               root /var/www/bmi-health-tracker;
               index index.html;
@@ -52,7 +48,7 @@ jobs:
 
               # Proxy API requests to Node.js backend
               location /api/ {
-                  proxy_pass http://127.0.0.1:3000;
+                  proxy_pass http://${{ secrets.EC2_HOST_BACKEND }}:3000;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -73,6 +69,28 @@ jobs:
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && sudo systemctl restart nginx
       
+      - name: Deploy DATABASE
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST_DATABASE }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            sudo apt update && sudo apt upgrade -y
+            sudo apt install -y postgresql postgresql-contrib
+            sudo systemctl start postgresql
+            sudo systemctl enable postgresql
+            sudo -u postgres psql -c "CREATE USER bmi_user WITH PASSWORD 'bmi_user';"  
+            sudo -u postgres psql -c "CREATE DATABASE bmidb;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bmidb TO bmi_user;"  
+            sudo -u postgres psql -d bmidb -c "GRANT ALL ON SCHEMA public TO bmi_user;"     
+            sudo -u postgres psql -d bmidb -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO bmi_user;"
+            git clone https://github.com/agkanon/3tier-webapp-github-actions.git
+            cd 3tier-webapp-github-actions/backend
+            PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
+            PGPASSWORD=bmi_user psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
+
+
 
       
       - name: Deploy Application
@@ -93,11 +111,11 @@ jobs:
             sudo mkdir -p /opt/bmi-app/backend
             sudo chown -R $USER:$USER /opt/bmi-app
             cat > /opt/bmi-app/backend/.env << EOF
-            DATABASE_URL=postgresql://bmi_user:bmi_user@localhost:5432/bmidb
+            DATABASE_URL=postgresql://bmi_user:bmi_user@${{ secrets.EC2_HOST_DATABASE }}:5432/bmidb
             DB_USER=bmi_user
             DB_PASSWORD=bmi_user
             DB_NAME=bmidb
-            DB_HOST=localhost
+            DB_HOST=${{ secrets.EC2_HOST_DATABASE }}
             DB_PORT=5432
             PORT=3000
             NODE_ENV=production
