@@ -1,0 +1,69 @@
+name: Build, Test and success CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    name: Build and Test 
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install UI dependencies
+        working-directory: ./frontend
+        run: |
+          sudo apt install -y nginx
+          sudo systemctl start nginx
+          sudo systemctl enable nginx  
+          npm install
+          npm run build
+          sudo mkdir -p /var/www/bmi-health-tracker
+          sudo rm -rf /var/www/bmi-health-tracker/*
+          sudo cp -r dist/* /var/www/bmi-health-tracker/
+          sudo chown -R www-data:www-data /var/www/bmi-health-tracker
+          sudo chmod -R 755 /var/www/bmi-health-tracker
+          sudo tee /etc/nginx/sites-available/bmi-health-tracker > /dev/null << 'EOF'
+          server {
+              listen 80;
+              server_name YOUR_SERVER_NAME;
+
+              root /var/www/bmi-health-tracker;
+              index index.html;
+
+              # React SPA — serve index.html for all non-file routes
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              # Proxy API requests to Node.js backend
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              # Security headers
+              add_header X-Frame-Options "SAMEORIGIN";
+              add_header X-Content-Type-Options "nosniff";
+              add_header X-XSS-Protection "1; mode=block";
+          }
+          EOF
+
+         
+
