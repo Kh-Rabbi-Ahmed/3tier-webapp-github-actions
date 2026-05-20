@@ -1,0 +1,4 @@
+aws_region = "us-east-1"
+aws_Access_Key = ""
+aws_Secret_Key = ""
+key_pair_name = "kanon"
